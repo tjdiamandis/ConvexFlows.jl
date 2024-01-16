@@ -1,0 +1,13 @@
+name = "ConvexFlows"
+uuid = "e6d6bbd2-f446-4b3b-b420-735d85b530c7"
+authors = ["Theo Diamandis"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
