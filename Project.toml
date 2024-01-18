@@ -3,6 +3,13 @@ uuid = "e6d6bbd2-f446-4b3b-b420-735d85b530c7"
 authors = ["Theo Diamandis"]
 version = "1.0.0-DEV"
 
+[deps]
+LBFGSB = "5be7bae1-8223-5378-bac3-9e7378a2f6e6"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
 julia = "1.10"
 
