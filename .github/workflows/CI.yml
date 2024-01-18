@@ -24,7 +24,6 @@ jobs:
       matrix:
         version:
           - '1.10'
-          - 'nightly'
         os:
           - ubuntu-latest
           - macOS-latest
@@ -47,3 +46,4 @@ jobs:
       - uses: codecov/codecov-action@v3
         with:
           files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
