@@ -1,6 +1,7 @@
+abstract type CFMM{T} <: Edge{T} end
 
 # ----- Uniswap edge -----
-struct Uniswap{T} <: Edge{T}
+struct Uniswap{T} <: CFMM{T}
     R::Vector{T}
     γ::T
     Ai::Vector{Int}
@@ -26,18 +27,29 @@ function CF.find_arb!(x::Vector{T}, e::Uniswap{T}, η::Vector{T}) where T
     return nothing
 end
 
+function price(::Uniswap{T}, Rp::Vector{T}) where T
+    return [Rp[2]/Rp[1], 1.0]
+end
+
+# checks how far η is from N(xstar)
+function suboptimality(cfmm::CFMM{T}, Rp::Vector{T}, η::Vector{T})
+    ηp = price(cfmm, Rp)
+    ηproj = clamp.(cfmm.γ .* ηp, η, ηp)
+    return norm(ηproj - ηp)^2
+end
+
 
 # ----- Balancer swap pool -----
-struct Balancer{T} <: Edge{T}
+struct Balancer{T} <: CFMM{T}
     R::Vector{T}
     γ::T
     Ai::Vector{Int}
-    w::Vector{T}
+    w::T
 
-    function Balancer(R::Vector{T}, γ::T, Ai::Vector{Int}, w::Vector{T}) where T <: AbstractFloat
+    function Balancer(R::Vector{T}, γ::T, Ai::Vector{Int}, w::T) where T <: AbstractFloat
         length(R) != 2 && ArgumentError("R must be of length 2")
         length(Ai) != 2 && ArgumentError("Ai must be of length 2")
-        !isapprox(sum(w), atol=1e-8) && ArgumentError("weights must sum to 1")
+        !(w > 0 && w < 1) && ArgumentError("w must be in (0, 1)")
 
         return new{T}(R, γ, Ai, w)
     end
@@ -51,16 +63,20 @@ function CF.find_arb!(x::Vector{T}, e::Balancer{T}, η::Vector{T}) where T
     @inline geom_arb_λ(m, r1, r2, η, γ) = max(r1 - ((r2*r1^(1/η))/(η*γ*m))^(η/(1+η)), 0)
 
     R, γ, w = e.R, e.γ, e.w
-    ratio = w[1]/w[2]
+    ratio = w/(1-w)
     x[1] = geom_arb_λ(η[1]/η[2], R[1], R[2], ratio, γ) - geom_arb_δ(η[2]/η[1], R[2], R[1], ratio, γ)
     x[2] = geom_arb_λ(η[2]/η[1], R[2], R[1], 1/ratio, γ) - geom_arb_δ(η[1]/η[2], R[1], R[2], 1/ratio, γ)
     return nothing
 end
 
+function price(cfmm::Balancer{T}, Rp::Vector{T}) where T
+    return [cfmm.w / (1 - cfmm.w) * Rp[2]/Rp[1], 1.0]
+end
+
 
 # ----- Balancer three pool -----
 # equal weights (e.g., used for stable swaps)
-struct BalancerThreePool{T} <: Edge{T}
+struct BalancerThreePool{T} <: CFMM{T}
     R::Vector{T}
     γ::T
     Ai::Vector{Int}
@@ -74,11 +90,9 @@ struct BalancerThreePool{T} <: Edge{T}
         set_silent(optimizer)
         @variable(optimizer, Δ[1:3] .≥ 0)
         @variable(optimizer, Λ[1:3] .≥ 0)
-        @variable(optimizer, x[1:3])
 
         k = (R[1]*R[2]*R[3])^1/3
-        @constraint(optimizer, [k; x] ∈ MOI.GeometricMeanCone(3+1))
-        @constraint(optimizer, x == R + γ*Δ - Λ)
+        @constraint(optimizer, [k; R + γ*Δ - Λ] ∈ MOI.GeometricMeanCone(3+1))
 
         return new{T}(R, γ, Ai, optimizer)
     end
@@ -92,3 +106,8 @@ function CF.find_arb!(x::Vector{T}, e::BalancerThreePool{T}, η::Vector{T}) wher
     x .= value.(m[:Λ] - m[:Δ])
     return nothing
 end
+
+function price(::BalancerThreePool{T}, Rp::Vector{T}) where T
+    return [Rp[3]/Rp[1], Rp[2]/Rp[1], 1.0]
+end
+
