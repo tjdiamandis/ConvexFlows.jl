@@ -1,13 +1,12 @@
 struct Solver{
     T <: AbstractFloat,
-    E <: Edge{T},
     V <: Vector{T},
     OV <: Objective,
 }
     flow_objective::OV
     edge_objectives::Union{Vector{<: Objective}, Nothing}
     Vis_zero::Bool
-    edges::Vector{E}
+    edges::Vector{<: Edge}
     y::V
     xs::Vector{V}
     ν::V
@@ -21,10 +20,13 @@ end
 function Solver(;
     flow_objective::Objective,
     edge_objectives::Union{Vector{<:Objective}, Nothing}=nothing,
-    edges::Vector{E},
+    edges::Vector{<: Edge},
     n::Int,
     # m::Int,
-) where {T, E <: Edge{T}}
+)
+    # Need while using LBFGS.jl 
+    T = Float64
+
     # dimension checks
     m = length(edges)
     n != length(vcat([e.Ai for e in edges]...)) && ArgumentError("n must be the number of nodes")
@@ -105,7 +107,7 @@ function solve!(
 
     # set initial values
     if isnothing(ν0)
-        s.μt[1:s.n] .= one(T) / s.n
+        s.μt[1:s.n] .= bounds[2, 1:s.n] .+ ones(T, s.n)
     else
         s.μt[1:s.n] .= ν0
     end
