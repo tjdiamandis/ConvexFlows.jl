@@ -1,3 +1,39 @@
+# U(y) = cᵀy - I(y ≥ 0)
+struct LinearNonnegative{T} <: Objective 
+    n::Int
+    c::Vector{T}
+end
+function LinearNonnegative(c::Vector{T}) where T
+    all(c .> 0) || throw(ArgumentError("all elements must be strictly positive"))
+    n = length(c)
+    return LinearNonnegative{Float64}(n, c)
+end
+
+function U(obj::LinearNonnegative{T}, y) where T
+    return dot(obj.c, y)
+end
+
+function grad_U(obj::ArbitragePenalty{T}, y) where T
+    return obj.c
+end
+
+# Assumes that ν - c ≥ 0
+function CF.Ubar(obj::LinearNonnegative{T}, ν) where T
+    return zero(T)
+end
+
+# Assumes that ν - c ≥ 0
+function CF.grad_Ubar!(g, obj::LinearNonnegative{T}, ν) where T
+    g .= zero(T)
+    return nothing
+end
+
+# Add a small amount to the lower limit to avoid numerical issues
+CF.lower_limit(obj::LinearNonnegative{T}) where {T} = obj.c .+ sqrt(eps(T))
+CF.upper_limit(obj::LinearNonnegative{T}) where {T} = convert(T, Inf) .+ zeros(T, obj.n)
+
+
+
 # U(y) = cᵀy - (¹/₂)∑ max(0, -yᵢ)²
 struct ArbitragePenalty{T} <: Objective 
     n::Int
