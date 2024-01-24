@@ -27,14 +27,22 @@ function CF.find_arb!(x::Vector{T}, e::Uniswap{T}, η::Vector{T}) where T
     return nothing
 end
 
+function valid_trade(cfmm::Uniswap{T}, Δ::Vector{T}, Λ::Vector{T}) where T
+    R, γ = cfmm.R, cfmm.γ
+    ϕR = sqrt(R[1]*R[2])
+    Rp = @. R + γ * Δ - Λ
+    return all(Δ .≥ 0) && all(Λ .≥ 0) && all(Rp .≥ 0) && sqrt(Rp[1]*Rp[2]) ≥ ϕR - sqrt(eps(T))
+end
+
 function price(::Uniswap{T}, Rp::Vector{T}) where T
     return [Rp[2]/Rp[1], 1.0]
 end
 
 # checks how far η is from N(xstar)
-function suboptimality(cfmm::CFMM{T}, Rp::Vector{T}, η::Vector{T})
+function suboptimality(cfmm::CFMM{T}, Rp::Vector{T}, η::Vector{T}) where T
     ηp = price(cfmm, Rp)
-    ηproj = clamp.(cfmm.γ .* ηp, η, ηp)
+    η_normalized = η ./ η[end]
+    ηproj = clamp.(cfmm.γ .* ηp, η_normalized, ηp)
     return norm(ηproj - ηp)^2
 end
 
@@ -59,14 +67,21 @@ end
 # Assumes that v > 0 and w > 0.
 function CF.find_arb!(x::Vector{T}, e::Balancer{T}, η::Vector{T}) where T
     # See App. A of "An Analysis of Uniswap Markets"
-    @inline geom_arb_δ(m, r1, r2, η, γ) = max((γ*m*η*r1*r2^η)^(1/(η+1)) - r2, 0)/γ
-    @inline geom_arb_λ(m, r1, r2, η, γ) = max(r1 - ((r2*r1^(1/η))/(η*γ*m))^(η/(1+η)), 0)
+    @inline geom_arb_δ(m, r1, r2, η, γ) = max((γ*m*η*r1*r2^η)^(1/(η+1)) - r2, 0.0)/γ
+    @inline geom_arb_λ(m, r1, r2, η, γ) = max(r1 - ((r2*r1^(1/η))/(η*γ*m))^(η/(1+η)), 0.0)
 
     R, γ, w = e.R, e.γ, e.w
     ratio = w/(1-w)
-    x[1] = geom_arb_λ(η[1]/η[2], R[1], R[2], ratio, γ) - geom_arb_δ(η[2]/η[1], R[2], R[1], ratio, γ)
-    x[2] = geom_arb_λ(η[2]/η[1], R[2], R[1], 1/ratio, γ) - geom_arb_δ(η[1]/η[2], R[1], R[2], 1/ratio, γ)
+    x[1] = geom_arb_λ(η[1]/η[2], R[1], R[2], 1/ratio, γ) - geom_arb_δ(η[2]/η[1], R[2], R[1], ratio, γ)
+    x[2] = geom_arb_λ(η[2]/η[1], R[2], R[1], ratio, γ) - geom_arb_δ(η[1]/η[2], R[1], R[2], 1/ratio, γ)
     return nothing
+end
+
+function valid_trade(cfmm::Balancer{T}, Δ::Vector{T}, Λ::Vector{T}) where T
+    R, γ, w = cfmm.R, cfmm.γ, cfmm.w
+    ϕR = R[1]^w*R[2]^(1-w)
+    Rp = @. R + γ * Δ - Λ
+    return all(Δ .≥ 0) && all(Λ .≥ 0) && all(Rp .≥ 0) && Rp[1]^w*Rp[2]^(1-w) ≥ ϕR - sqrt(eps(T))
 end
 
 function price(cfmm::Balancer{T}, Rp::Vector{T}) where T
@@ -91,7 +106,7 @@ struct BalancerThreePool{T} <: CFMM{T}
         @variable(optimizer, Δ[1:3] .≥ 0)
         @variable(optimizer, Λ[1:3] .≥ 0)
 
-        k = (R[1]*R[2]*R[3])^1/3
+        k = geomean(R)
         @constraint(optimizer, [k; R + γ*Δ - Λ] ∈ MOI.GeometricMeanCone(3+1))
 
         return new{T}(R, γ, Ai, optimizer)
@@ -107,7 +122,14 @@ function CF.find_arb!(x::Vector{T}, e::BalancerThreePool{T}, η::Vector{T}) wher
     return nothing
 end
 
+function valid_trade(cfmm::BalancerThreePool{T}, Δ::Vector{T}, Λ::Vector{T}) where T
+    R, γ = cfmm.R, cfmm.γ
+    ϕR = geomean(R)
+    Rp = @. R + γ * Δ - Λ
+    return all(Δ .≥ 0) && all(Λ .≥ 0) && all(Rp .≥ 0) && geomean(Rp) ≥ ϕR - sqrt(eps(T))
+end
+
 function price(::BalancerThreePool{T}, Rp::Vector{T}) where T
-    return [Rp[3]/Rp[1], Rp[2]/Rp[1], 1.0]
+    return [Rp[3]/Rp[1], Rp[3]/Rp[2], 1.0]
 end
 

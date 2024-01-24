@@ -19,7 +19,7 @@ end
 
 function add_cfmm(optimizer, cfmm::BalancerThreePool, Δ, Λ)
     R, γ = cfmm.R, cfmm.γ
-    ϕR = (R[1]*R[2]*R[3])^(1/3)
+    ϕR = geomean(R)
     @constraint(optimizer, [ϕR; R + γ * Δ - Λ] in MOI.GeometricMeanCone(3+1))
     @constraint(optimizer, Δ .≥ 0)
     @constraint(optimizer, Λ .≥ 0)
@@ -27,12 +27,12 @@ function add_cfmm(optimizer, cfmm::BalancerThreePool, Δ, Λ)
 end
 
 
-function build_jump_arbitrage_model(cfmms, c; Vis_zero::Bool=true, optimizer=Mosek.Optimizer())
+function build_jump_arbitrage_model(cfmms, c; Vis_zero::Bool=true, optimizer=() -> Mosek.Optimizer(), verbose=false)
     m = length(cfmms)
     n = maximum([maximum(cfmm.Ai) for cfmm in cfmms])
 
     model = Model(optimizer)
-    set_silent(model)
+    !verbose && set_silent(model)
     @variable(model, y[1:n])
     Δs = [@variable(model, [1:length(cfmm)]) for cfmm in cfmms]
     Λs = [@variable(model, [1:length(cfmm)]) for cfmm in cfmms]
@@ -80,7 +80,9 @@ end
 
 function run_trial_jump(cfmms, c; Vis_zero::Bool=true, optimizer=Mosek.Optimizer())
     model, Δs, Λs = build_jump_arbitrage_model(cfmms, c, Vis_zero=Vis_zero, optimizer=optimizer)
+    GC.gc()
     optimize!(model)
     time = solve_time(optimizer)
     status = termination_status(optimizer)
     status != MOI.OPTIMAL && @info "\t\tMosek termination status: $status"
+end

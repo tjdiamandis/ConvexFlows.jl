@@ -30,32 +30,23 @@ for i in 1:n_pools
         Ai = sample(collect(1:n_tokens), 2, replace=false)
         w = 0.8
         push!(cfmms, Balancer(Ri, γ, Ai, w))
-    # else
-    #     Ri = 1000 * rand(3) .+ 1000
-    #     Ai = sample(collect(1:n_tokens), 3, replace=false)
-    #     push!(cfmms, BalancerThreePool(Ri, γ, Ai))
+    else
+        Ri = 1000 * rand(3) .+ 1000
+        Ai = sample(collect(1:n_tokens), 3, replace=false)
+        push!(cfmms, BalancerThreePool(Ri, γ, Ai))
     end
         
 end
 
-
-
-cfmms = [
-    Uniswap([1e3, 1e4], 0.997, [1, 2]),
-    Uniswap([1e3, 1e2], 0.997, [2, 3]),
-    Uniswap([1e3, 2e4], 0.997, [1, 3])
-]
-
 n = maximum([maximum(cfmm.Ai) for cfmm in cfmms])
 m = length(cfmms)
 
-
-min_price = 1e-3
+min_price = 1e-2
 max_price = 1e1
 c = rand(n) .* (max_price - min_price) .+ min_price
 
-Vis_zero = false
-optimizer, Δs, Λs = build_mosek_arbitrage_model(cfmms, c, Vis_zero)
+Vis_zero = true
+optimizer, Δs, Λs = build_jump_arbitrage_model(cfmms, c; Vis_zero=Vis_zero, optimizer=() -> Mosek.Optimizer(), verbose=true)
 GC.gc()
 optimize!(optimizer)
 time = solve_time(optimizer)
@@ -72,28 +63,27 @@ for (i, cfmm) in enumerate(cfmms)
     @. net_flow[cfmm.Ai] += Λs_v[i] - Δs_v[i]
 end
 norm(net_flow - ystar) / max(norm(net_flow), norm(ystar))
+dstar = dual_objective_value(optimizer)
+pstar = objective_value(optimizer)
+gap = (dstar - pstar) / max(abs(dstar), abs(pstar))
 
-# Uy = Swap(1, 2, 10.0, n)
+
 Uy = ArbitragePenalty(c)
-# U(Uy, ystar)
-# Uy = LinearNonnegative(c)
-
-# μ = n*rand(n)
-# σ = rand(n)
-# Uy = Markowitz(μ, σ)
-
 s = Solver(
     flow_objective=Uy,
     edges=cfmms,
     n=n,
 )
-@time solve!(s, verbose=true, factr=1e1, memory=10)
+trial = @timed begin solve!(s, verbose=true, factr=1e1, memory=7) end
 # netflows = s.y .|> x -> round(x, digits=2)
 netflows = s.y
 # @show netflows
-objval = U(Uy, s.y)
-@show objval
-dot(s.y, c) - sum(abs2, max.(-s.y, 0.0))
+pstar = U(Uy, netflows)
+dstar = Ubar(Uy, s.ν) + sum(dot(s.ν[cfmms[i].Ai], s.xs[i]) for i in 1:m)
+gap = (dstar - pstar) / max(abs(dstar), abs(pstar))
+valid_trades(cfmms, xs=s.xs)
+avg_subopt, count = check_optimality(s.ν, cfmms, xs=s.xs)
+
 # g = zeros(n)
 # grad_Ubar!(g, Uy, s.y)
 # objval_g = U(Uy, g)
