@@ -14,105 +14,114 @@ include("objectives.jl")
 include("jump.jl")
 include("utils.jl")
 
-n_pools = 100
-n_tokens = round(Int, 2 * sqrt(n_pools))
-cfmms = Edge[]
-Random.seed!(1)
-for i in 1:n_pools
-    rn = rand()
-    γ = 0.997
-    if rn < 0.4
-        Ri = 100 * rand(2) .+ 100
-        Ai = sample(collect(1:n_tokens), 2, replace=false)
-        push!(cfmms, Uniswap(Ri, γ, Ai))
-    elseif rn < 0.8
-        Ri = 1000 * rand(2) .+ 1000
-        Ai = sample(collect(1:n_tokens), 2, replace=false)
-        w = 0.8
-        push!(cfmms, Balancer(Ri, γ, Ai, w))
-    else
-        Ri = 1000 * rand(3) .+ 1000
-        Ai = sample(collect(1:n_tokens), 3, replace=false)
-        push!(cfmms, BalancerThreePool(Ri, γ, Ai))
+function build_pools(n_pools, n_tokens; rseed=1)
+    cfmms = Vector{Edge}()
+    Random.seed!(rseed)
+    for i in 1:n_pools
+        rn = rand()
+        γ = 0.997
+        if rn < 0.4
+            Ri = 100 * rand(2) .+ 100
+            Ai = sample(collect(1:n_tokens), 2, replace=false)
+            push!(cfmms, Uniswap(Ri, γ, Ai))
+        elseif rn < 0.8
+            Ri = 100 * rand(2) .+ 100
+            Ai = sample(collect(1:n_tokens), 2, replace=false)
+            w = 0.8
+            push!(cfmms, Balancer(Ri, γ, Ai, w))
+        else
+            Ri = 100 * rand(3) .+ 100
+            Ai = sample(collect(1:n_tokens), 3, replace=false)
+            push!(cfmms, BalancerThreePool(Ri, γ, Ai))
+        end
+            
     end
-        
+    return cfmms
 end
 
-n = maximum([maximum(cfmm.Ai) for cfmm in cfmms])
-m = length(cfmms)
+
+function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false)
+    m = length(cfmms)
+    toks = union([Set(cfmm.Ai) for cfmm in cfmms]...)
+    n = maximum(toks)
+    @assert length(toks) == n
+
+    if isnothing(Vis)
+        s = Solver(
+            flow_objective=Uy,
+            edges=cfmms,
+            n=n,
+        )
+    else
+        s = Solver(
+            flow_objective=Uy,
+            edge_objectives=Vis,
+            edges=cfmms,
+            n=n
+        )
+    end
+
+    trial = @timed begin solve!(s, verbose=verbose, factr=1e7, memory=memory) end
+    time = trial.time
+    
+    pstar = U(Uy, s.y)
+    dstar = Ubar(Uy, s.ν)
+    if isnothing(Vis)
+        dstar += sum(dot(s.ν[cfmms[i].Ai], s.xs[i]) for i in 1:m)
+    else
+        pstar += sum(U(Vis[i], s.xs[i]) for i in 1:m)
+        dstar += sum(
+            Ubar(Vis[i], s.ηts[i]) + 
+            dot(s.ν[cfmms[i].Ai] + s.ηts[i], s.xs[i]) 
+            for i in 1:m
+        )
+    end
+    dual_gap = (dstar - pstar) / max(abs(dstar), abs(pstar))
+
+    !valid_trades(cfmms, xs=s.xs) && @warn "Some invalid trades for router solution"
+    avg_subopt = check_optimality(s.ν, cfmms, xs=s.xs)
+    Uy_violation = norm(max.(-s.y, 0.0)) / norm(s.y)
+    return time, pstar, dual_gap, Uy_violation
+end
+
+m = 1_000
+n = round(Int, 2*sqrt(m))
+cfmms = build_pools(m, n)
 
 min_price = 1e-2
-max_price = 1e1
+max_price = 1.0
+Random.seed!(1)
 c = rand(n) .* (max_price - min_price) .+ min_price
 
 Vis_zero = true
-optimizer, Δs, Λs = build_jump_arbitrage_model(cfmms, c; Vis_zero=Vis_zero, optimizer=() -> Mosek.Optimizer(), verbose=true)
-GC.gc()
-optimize!(optimizer)
-time = solve_time(optimizer)
-status = termination_status(optimizer)
-status != MOI.OPTIMAL && @info "\t\tMosek termination status: $status"
-ystar = value.(optimizer[:y])
-pstar = dot(c, ystar) - 0.5*sum(abs2, max.(-ystar, 0.0)) - (Vis_zero ? 0.0 : 0.5*sum(value.(optimizer[:t])))
-pstar = objective_value(optimizer)
-@show pstar
-Δs_v = [value.(Δ) for Δ in Δs]
-Λs_v = [value.(Λ) for Λ in Λs]
-net_flow = zeros(n)
-for (i, cfmm) in enumerate(cfmms)
-    @. net_flow[cfmm.Ai] += Λs_v[i] - Δs_v[i]
-end
-norm(net_flow - ystar) / max(norm(net_flow), norm(ystar))
-dstar = dual_objective_value(optimizer)
-pstar = objective_value(optimizer)
-gap = (dstar - pstar) / max(abs(dstar), abs(pstar))
+time, p_jump = run_trial_jump(
+    cfmms, 
+    c; 
+    Vis_zero=Vis_zero, 
+    optimizer=() -> Mosek.Optimizer()
+)
+
+
+Uy = LinearNonnegative(c)
+time, p_flow, dual_gap, Uy_violation = run_trial_flows(Uy=Uy, cfmms=cfmms)
+rel_diff = (p_flow - p_jump) / max(abs(p_flow), abs(p_jump))
+
+Vis_zero = false
+time, p_jump = run_trial_jump(
+    cfmms, 
+    c; 
+    Vis_zero=Vis_zero, 
+    optimizer=() -> Mosek.Optimizer()
+)
 
 
 Uy = ArbitragePenalty(c)
-s = Solver(
-    flow_objective=Uy,
-    edges=cfmms,
-    n=n,
-)
-trial = @timed begin solve!(s, verbose=true, factr=1e1, memory=7) end
-# netflows = s.y .|> x -> round(x, digits=2)
-netflows = s.y
-# @show netflows
-pstar = U(Uy, netflows)
-dstar = Ubar(Uy, s.ν) + sum(dot(s.ν[cfmms[i].Ai], s.xs[i]) for i in 1:m)
-gap = (dstar - pstar) / max(abs(dstar), abs(pstar))
-valid_trades(cfmms, xs=s.xs)
-avg_subopt, count = check_optimality(s.ν, cfmms, xs=s.xs)
-
-# g = zeros(n)
-# grad_Ubar!(g, Uy, s.y)
-# objval_g = U(Uy, g)
-
 Vis = [NondecreasingQuadratic(length(cfmm)) for cfmm in cfmms]
-s2 = Solver(
-    flow_objective=Uy,
-    edge_objectives=Vis,
-    edges=cfmms,
-    n=n
-)
-solve!(s2, verbose=true, max_iter=1000, max_fun=1000, memory=5)
-netflows = s2.y .|> x -> round(x, digits=2)
-@show netflows
-# @show s2.xs
-# netflows[2] - sum(norm(max.(-x, 0.0))^2 for x in s2.xs)
-dot(s2.y, c) - sum(abs2, max.(-s2.y, 0.0)) - sum(norm(max.(-x, 0.0))^2 for x in s2.xs)
-
-# Swap
-
-time = solve_time(routing)
-status = termination_status(routing)
-status != MOI.OPTIMAL && @info "\t\tMosek termination status: $status"
-Ψv = round.(Int, value.(Ψ))
-@show value.(t)
-
-return time, Ψv, [value.(Λ[i]) - value.(Δ[i]) for i in 1:n_pools]
-
-_, ym, xms = run_trial_mosek(cfmms)
-@show ym
-@show xms
-ym[2] - sum(norm(max.(-x, 0.0))^2 for x in xms)
+time, p_flow, dual_gap, Uy_violation = 
+    run_trial_flows(Uy=Uy,
+        Vis=Vis,
+        cfmms=cfmms,
+        verbose=true, 
+        memory=100
+    )
+rel_diff = (p_flow - p_jump) / max(abs(p_flow), abs(p_jump))

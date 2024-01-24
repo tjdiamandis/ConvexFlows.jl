@@ -13,7 +13,7 @@ function U(obj::LinearNonnegative{T}, y) where T
     return dot(obj.c, y)
 end
 
-function grad_U(obj::ArbitragePenalty{T}, y) where T
+function grad_U(obj::LinearNonnegative{T}, y) where T
     return obj.c
 end
 

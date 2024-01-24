@@ -27,7 +27,13 @@ function add_cfmm(optimizer, cfmm::BalancerThreePool, Δ, Λ)
 end
 
 
-function build_jump_arbitrage_model(cfmms, c; Vis_zero::Bool=true, optimizer=() -> Mosek.Optimizer(), verbose=false)
+function build_jump_arbitrage_model(
+    cfmms, 
+    c; 
+    Vis_zero::Bool=true, 
+    optimizer=() -> Mosek.Optimizer(), 
+    verbose=false
+)
     m = length(cfmms)
     n = maximum([maximum(cfmm.Ai) for cfmm in cfmms])
 
@@ -61,28 +67,38 @@ function build_jump_arbitrage_model(cfmms, c; Vis_zero::Bool=true, optimizer=() 
     end
     
     # create objective
-    # @constraint(model, y .≥ 0.0)
-    @variable(model, p1[1:n])
-    @variable(model, p2[1:n])
-    for i in 1:n
-        @constraint(model, [0.5; p1[i]; p2[i]] in MOI.RotatedSecondOrderCone(3))
-        @constraint(model, p2[i] .≥ -y[i])
-        @constraint(model, p2[i] .≥ 0.0)
-    end
+    # @variable(model, p1[1:n])
+    # @variable(model, p2[1:n])
+    # for i in 1:n
+    #     @constraint(model, [0.5; p1[i]; p2[i]] in MOI.RotatedSecondOrderCone(3))
+    #     @constraint(model, p2[i] .≥ -y[i])
+    #     @constraint(model, p2[i] .≥ 0.0)
+    # end
+    @constraint(model, y .≥ 0.0)
     if !Vis_zero
-        @objective(model, Max, dot(c, y) - 0.5*sum(p1) - 0.5*sum(t))
+        @objective(model, Max, dot(c, y) - 0.5*sum(t))
+        # @objective(model, Max, dot(c, y) - 0.5*sum(p1) - 0.5*sum(t))
     else
-        @objective(model, Max, dot(c, y) - 0.5*sum(p1))
+        @objective(model, Max, dot(c, y))
+        # @objective(model, Max, dot(c, y) - 0.5*sum(p1))
     end
 
     return model, Δs, Λs
 end
 
-function run_trial_jump(cfmms, c; Vis_zero::Bool=true, optimizer=Mosek.Optimizer())
-    model, Δs, Λs = build_jump_arbitrage_model(cfmms, c, Vis_zero=Vis_zero, optimizer=optimizer)
+function run_trial_jump(cfmms,
+    c; 
+    Vis_zero::Bool=true,
+    optimizer=() -> Mosek.Optimizer(),
+    verbose=false
+)
+    model, Δs, Λs = build_jump_arbitrage_model(cfmms, c, Vis_zero=Vis_zero, optimizer=optimizer, verbose=verbose)
     GC.gc()
     optimize!(model)
-    time = solve_time(optimizer)
-    status = termination_status(optimizer)
+    time = solve_time(model)
+    status = termination_status(model)
     status != MOI.OPTIMAL && @info "\t\tMosek termination status: $status"
+    pstar = objective_value(model)
+
+    return time, pstar
 end

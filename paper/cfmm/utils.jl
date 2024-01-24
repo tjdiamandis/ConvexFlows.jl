@@ -46,10 +46,7 @@ function check_optimality(ν, cfmms; ηs=nothing, xs=nothing, Δs=nothing, Λs=n
         Rp = cfmm.R + cfmm.γ * Δs[i] - Λs[i]
         subopt_i = suboptimality(cfmm, Rp, ηs[i])
         subopt += subopt_i
-        if subopt_i > tol
-            count += 1
-            @warn "CFMM $i is not optimal: $(subopt_i)"
-        end
+        count += subopt_i > tol
     end
 
     return subopt / length(cfmms), count
