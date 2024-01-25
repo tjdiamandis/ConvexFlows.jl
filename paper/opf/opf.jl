@@ -1,6 +1,6 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
-using Random, LinearAlgebra
+using Random, LinearAlgebra, SparseArrays
 using BenchmarkTools
 using Convex, MosekTools, SCS
 using StatsBase, LogExpFunctions
