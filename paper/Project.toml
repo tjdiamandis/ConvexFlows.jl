@@ -1,5 +1,8 @@
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
+GraphPlot = "a2cc645c-3eea-5389-862e-a155d0052231"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LogExpFunctions = "2ab3a3ac-af41-5b50-aa03-7779005ae688"

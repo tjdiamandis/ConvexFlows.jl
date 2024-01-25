@@ -1,18 +1,19 @@
 # ----- TransmissionLine edge ----
-struct TransmissionLine{T} <: Edge{T}
+struct TransmissionLine{T} <: CF.Edge{T}
     b::T
     α::T
     β::T
     p_min::T
     p_max::T
     flow_max::T
+    Ai::Vector{Int}
 end
-function TransmissionLine(b::T) where T <: AbstractFloat
+function TransmissionLine(b::T, Ai::Vector{Int}) where T <: AbstractFloat
     α, β = T(16), T(1/4)
     p_max = one(T)
     p_min = 3 - α * β * logistic(β * b)
     flow_max = 3b -  α * (log1pexp(β * b) - log(2)) 
-    return TransmissionLine(b, α, β, p_min, p_max, flow_max)
+    return TransmissionLine(b, α, β, p_min, p_max, flow_max, Ai)
 end
 
 function gain(w::T, e::TransmissionLine{T}) where T
@@ -30,15 +31,15 @@ end
 function CF.find_arb!(x::Vector{T}, e::TransmissionLine{T}, η::Vector{T}) where T
     η1, η2 = η[1], η[2]
 
-    if e.p_max ≤ η1/η2
+    if iszero(η[2]) || e.p_max ≤ η1/η2
         x .= zero(T)
     elseif e.p_min ≥ η1/η2
-        x[1] = e.b
+        x[1] = -e.b
         x[2] = e.flow_max
     else 
         # assumes α*β = 4 (see paper)
-        x[1] = 1/e.β * log((3η2 - η1)/(η2 + η1))
-        x[2] = gain(x[1], e)
+        x[1] = -1/e.β * log((3η2 - η1)/(η2 + η1))
+        x[2] = gain(-x[1], e)
     end
 
     # Alternative way that doesn't "short-circuit" by checking price
@@ -51,9 +52,9 @@ function check_optimality(x::Vector{T}, e::TransmissionLine{T}, η::Vector{T}; t
     η1, η2 = η[1], η[2]
     p = η1/η2
     
-    isapprox(p, d_gain(x[1], e), atol=tol) && return true
+    isapprox(p, d_gain(-x[1], e), atol=tol) && return true
     p ≥ d_gain(zero(T), e) && iszero(x[1]) && return true
-    p ≤ d_gain(e.b, e) && isapprox(x[1], e.b, atol=tol) && return true
+    p ≤ d_gain(e.b, e) && isapprox(-x[1], e.b, atol=tol) && return true
     return false
 
 end
