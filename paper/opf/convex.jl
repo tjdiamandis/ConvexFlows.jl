@@ -31,6 +31,62 @@ function build_convex_model(d, lines)
     prob = maximize(obj, cons)
     return prob, y, xs
 end
-    
-Convex.solve!(prob, Mosek.Optimizer())
-prob.optval
+
+function Convex.solve!(
+    problem::Problem{T},
+    optimizer::Convex.MOI.ModelLike;
+    check_vexity::Bool = true,
+    verbose::Bool = true,
+    warmstart::Bool = false,
+    silent_solver::Bool = false,
+) where {T}
+    MOI = Convex.MOI
+    MOIU = Convex.MOIU
+    MOIB = Convex.MOIB
+
+    if check_vexity
+        vex = vexity(problem)
+    end
+
+    model = MOIB.full_bridge_optimizer(
+        MOIU.CachingOptimizer(
+            MOIU.UniversalFallback(MOIU.Model{T}()),
+            optimizer,
+        ),
+        T,
+    )
+
+    id_to_variables,
+    conic_constr_to_constr,
+    conic_constraints,
+    var_to_indices,
+    constraint_indices = Convex.load_MOI_model!(model, problem)
+
+    if warmstart
+        warmstart_variables!(model, var_to_indices, id_to_variables, T, verbose)
+    end
+
+    if silent_solver
+        MOI.set(model, MOI.Silent(), true)
+    end
+
+    MOI.optimize!(model)
+    problem.model = model
+
+    # populate the status, primal variables, and dual variables (when possible)
+    Convex.moi_populate_solution!(
+        model,
+        problem,
+        id_to_variables,
+        conic_constr_to_constr,
+        conic_constraints,
+        var_to_indices,
+        constraint_indices,
+    )
+
+    if problem.status != MOI.OPTIMAL && verbose
+        @warn "Problem status $(problem.status); solution may be inaccurate."
+    end
+
+    return model
+end
