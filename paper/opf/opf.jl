@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 using Random, LinearAlgebra, SparseArrays
 using BenchmarkTools
-using Convex, MosekTools, SCS
+using Convex, MosekTools, SCS, JuMP
 using StatsBase, LogExpFunctions
 using Graphs: Graph, connected_components
 import GraphPlot
@@ -20,7 +20,7 @@ const FIGPATH = joinpath(@__DIR__, "..", "figures")
 include("edges.jl")
 include("objectives.jl")
 include("utils.jl")
-include("convex.jl")
+include("jump.jl")
 # ******************************************************************************
 
 
@@ -58,14 +58,10 @@ d = rand((0.5, 1., 2.), n)
 Uy = QuadraticPowerCost(d)
 
 # Solve with Mosek
-prob_cvx, y_cvx, xs_cvx = build_convex_model(d, lines)
-Convex.solve!(
-    prob_cvx,
-    Mosek.Optimizer(),
-    silent_solver=true
-)
-prob_cvx.status != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
-pstar = prob_cvx.optval
+model, _ = build_jump_opf_model(lines, d, verbose=false)
+optimize!(model)
+termination_status(model) != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
+pstar = objective_value(model)
 
 
 # Solve with ConvexFlows.jl
@@ -130,17 +126,13 @@ savefig(iter_conv_plt, joinpath(FIGPATH, "opf-iter-conv.pdf"))
 # ******************************************************************************
 
 function run_trial_jump(d, lines, optimizer=Mosek.Optimizer())
-    prob_cvx, y_cvx, xs_cvx = build_convex_model(d, lines)
+    model, _ = build_jump_opf_model(lines, d, verbose=false)
     GC.gc()
-    model = Convex.solve!(
-        prob_cvx,
-        Mosek.Optimizer(),
-        silent_solver=true
-    )
-    solve_time = Convex.MOI.get(model, Convex.MOI.SolveTimeSec())
-    prob_cvx.status != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
-    pstar = prob_cvx.optval
-    return pstar, solve_time
+    optimize!(model)
+    time = solve_time(model)
+    termination_status(model) != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
+    pstar = objective_value(model)
+    return pstar, time
 end
 
 function run_trial_convexflows(d, lines)
@@ -202,7 +194,7 @@ function run_trials(ns)
     return ts_mosek, ts_cf
 end
 
-ns = 10. .^ (2:0.2:4) |> x -> round.(Int, x)
+ns = 10. .^ (2:0.2:5) |> x -> round.(Int, x)
 ts_mosek, ts_cf = run_trials(ns)
 
 time_plt = plot(
@@ -212,11 +204,12 @@ time_plt = plot(
     xlabel="Number of nodes",
     ylabel="Solve time (s)",
     yscale=:log,
+    xscale=:log,
     legend=:bottomright,
     # size=(400, 300),
     # ylims=(1e-3, 1e3),
-    # yticks=10. .^ (-3:3),
-    # xticks=10. .^ (2:4),
+    yticks=10. .^ (-3:3),
+    xticks=10. .^ (2:5),
     # grid=false,
     linewidth=3,
     color=:blue,
@@ -226,5 +219,5 @@ time_plt = plot(
     guidefontsize=12,
     legendtitlefontsize=12,
 )
-plot!(time_plt, ns, ts_cf, label="ConvexFlows", color=:black, linewidth=3)
+plot!(time_plt, ns, ts_cf, label="ConvexFlows.jl", color=:black, linewidth=3)
 savefig(time_plt, joinpath(FIGPATH, "opf-time.pdf"))
