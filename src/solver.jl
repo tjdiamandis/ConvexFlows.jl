@@ -10,9 +10,9 @@ struct Solver{
     y::V
     xs::Vector{V}
     ν::V
-    ηts::Vector{V}                                  # used for cache if Vᵢ = 0
+    ηts::Vector{V}
     arb_prices::Vector{V}
-    μt::V
+    μ0::V
     n::Int
     m::Int
 end
@@ -29,8 +29,10 @@ function Solver(;
 
     # dimension checks
     m = length(edges)
-    n != length(vcat([e.Ai for e in edges]...)) && ArgumentError("n must be the number of nodes")
-    !isnothing(edge_objectives) && length(edge_objectives) != m && ArgumentError("edge_objectives must be of length m")
+    n != length(vcat([e.Ai for e in edges]...)) && 
+        ArgumentError("n must be the number of nodes")
+    !isnothing(edge_objectives) && length(edge_objectives) != m && 
+        ArgumentError("edge_objectives must be of length m")
 
     # setup solver variables for primal and dual
     y = zeros(T, n)
@@ -39,7 +41,7 @@ function Solver(;
     ηs = [zeros(T, length(e.Ai)) for e in edges]
     arb_prices = [zeros(T, length(e.Ai)) for e in edges]
     Vis_zero = isnothing(edge_objectives) ? true : false
-    μt = zeros(T, Vis_zero ? n : n + sum([length(e.Ai) for e in edges]))
+    μ0 = zeros(T, Vis_zero ? n : n + sum([length(e.Ai) for e in edges]))
     
     return Solver(
         flow_objective,
@@ -51,7 +53,7 @@ function Solver(;
         ν,
         ηs,
         arb_prices,
-        μt,
+        μ0,
         n,
         m
     )
@@ -68,6 +70,7 @@ function find_arb!(s::Solver{T}) where T
         end
         # find_arb!(s.xs[i], s.edges[i], s.arb_prices[i])
     end
+    return nothing
 end
 
 function solve!(
@@ -109,35 +112,33 @@ function solve!(
 
     # set initial values
     if isnothing(ν0)
-        s.μt[1:s.n] .= bounds[2, 1:s.n] .+ ones(T, s.n)
+        s.μ0[1:s.n] .= bounds[2, 1:s.n] .+ ones(T, s.n)
     else
-        s.μt[1:s.n] .= ν0
+        s.μ0[1:s.n] .= ν0
     end
     if !s.Vis_zero
+        ind = s.n + 1
         for i in 1:s.m
-            s.ηts[i] .= s.μt[1:s.n][s.edges[i].Ai]
+            s.μ0[ind:ind+nis[1]-1] .= s.μ0[1:s.n][s.edges[i].Ai]
+            ind += nis[i]
         end
     end
 
     # Objective function
     function fn(μ::Vector{T}) where T
         # only update if find_arb! has not been called yet
-        # if any(ν .!= s.ν)
-        #     s.ν .= ν
-        #     find_arb!(s)
-        # end
-
-        # Load variables locally
-        # TODO: make more efficient
-        s.ν .= μ[1:s.n]
-        if !s.Vis_zero
-            ind = s.n + 1
-            for i in 1:s.m
-                s.ηts[i] .= μ[ind:ind+nis[i]-1]
-                ind += nis[i]
+        if any(μ[i] != s.ν[i] for i in 1:s.n)
+            # Load variables locally
+            s.ν .= μ[1:s.n]
+            if !s.Vis_zero
+                ind = s.n + 1
+                for i in 1:s.m
+                    s.ηts[i] .= μ[ind:ind+nis[i]-1]
+                    ind += nis[i]
+                end
             end
+            find_arb!(s)
         end
-        find_arb!(s)
 
 
         acc = zero(T)
@@ -155,21 +156,20 @@ function solve!(
     function grad!(g, μ::Vector{T}) where T
         g .= zero(T)
 
-        # if any(ν .!= s.ν)
-        #     s.ν .= ν
-        #     find_arb!(s)
-        # end
-        s.ν .= μ[1:s.n]
-        if !s.Vis_zero
-            ind = s.n + 1
-            for i in 1:s.m
-                s.ηts[i] .= μ[ind:ind+nis[i]-1]
-                ind += nis[i]
+        if any(μ[i] != s.ν[i] for i in 1:s.n)
+            s.ν .= μ[1:s.n]
+            if !s.Vis_zero
+                ind = s.n + 1
+                for i in 1:s.m
+                    s.ηts[i] .= μ[ind:ind+nis[i]-1]
+                    ind += nis[i]
+                end
             end
+            find_arb!(s)
         end
-        find_arb!(s)
         
-        @views grad_Ubar!(g[1:s.n], s.flow_objective, s.ν)
+        gν = @view g[1:s.n]
+        grad_Ubar!(gν, s.flow_objective, s.ν)
 
         ind = s.n + 1
         for i in 1:s.m
@@ -181,8 +181,9 @@ function solve!(
                 inds = ind:ind+ni-1
                 
                 # add to ∇_ηᵢ
-                @views grad_Ubar!(g[inds], s.edge_objectives[i], s.ηts[i])
-                @views g[inds] .+= s.xs[i]
+                gηi = @view g[inds]
+                @views grad_Ubar!(gηi, s.edge_objectives[i], s.ηts[i])
+                gηi .+= s.xs[i]
 
                 ind += ni
             end
@@ -197,10 +198,10 @@ function solve!(
 
     # create and call LBFGSB solver
     optimizer = L_BFGS_B(len_μ, 17)
-    _, μ = optimizer(
+    tt = @timed optimizer(
         fn,
         grad!,
-        s.μt,
+        s.μ0,
         bounds,
         m=memory,
         factr=factr,
@@ -209,6 +210,8 @@ function solve!(
         maxfun=max_fun,
         maxiter=max_iter
     )
+    _, μ = tt.value
+    solver_time = tt.time
 
     # Do final find_arb to get final values of edge flows
     s.ν .= μ[1:s.n]
@@ -223,6 +226,7 @@ function solve!(
     netflows!(s)
     
     # TODO: print objective, primal feasibility, etc
+    return solver_time
 end
 
 function netflows!(s::Solver{T}) where T
