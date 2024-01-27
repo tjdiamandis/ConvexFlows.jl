@@ -40,7 +40,7 @@ function build_pools(n_pools, n_tokens; rseed=1)
 end
 
 
-function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false)
+function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false, factr=1e-1)
     m = length(cfmms)
     toks = union([Set(cfmm.Ai) for cfmm in cfmms]...)
     n = maximum(toks)
@@ -61,7 +61,7 @@ function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false)
         )
     end
 
-    trial = @timed begin solve!(s, verbose=verbose, factr=1e7, memory=memory) end
+    trial = @timed begin solve!(s, verbose=verbose, factr=factr, memory=memory) end
     time = trial.time
     
     pstar = U(Uy, s.y)
@@ -84,7 +84,8 @@ function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false)
     return time, pstar, dual_gap, Uy_violation
 end
 
-m = 1_000
+ms = round.(Int, 10 .^ range(2, 5, 20))
+m = ms[10]
 n = round(Int, 2*sqrt(m))
 cfmms = build_pools(m, n)
 
@@ -103,8 +104,21 @@ time, p_jump = run_trial_jump(
 
 
 Uy = LinearNonnegative(c)
-time, p_flow, dual_gap, Uy_violation = run_trial_flows(Uy=Uy, cfmms=cfmms)
-rel_diff = (p_flow - p_jump) / max(abs(p_flow), abs(p_jump))
+time, p_flow, dual_gap, Uy_violation = run_trial_flows(Uy=Uy, cfmms=cfmms, verbose=true)
+rel_diff = (p_jump - p_flow) / max(abs(p_flow), abs(p_jump))
+
+
+
+
+
+m = 1_000
+n = round(Int, sqrt(m))
+cfmms = build_pools(m, n)
+
+min_price = 1e-2
+max_price = 1.0
+Random.seed!(1)
+c = rand(n) .* (max_price - min_price) .+ min_price
 
 Vis_zero = false
 time, p_jump = run_trial_jump(
@@ -122,6 +136,7 @@ time, p_flow, dual_gap, Uy_violation =
         Vis=Vis,
         cfmms=cfmms,
         verbose=true, 
-        memory=100
+        factr=1e-7,
+        memory=10
     )
 rel_diff = (p_flow - p_jump) / max(abs(p_flow), abs(p_jump))

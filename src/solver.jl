@@ -60,11 +60,13 @@ end
 function find_arb!(s::Solver{T}) where T
     Threads.@threads for i in 1:length(s.xs)
         if s.Vis_zero
-            s.arb_prices[i] .= s.ν[s.edges[i].Ai] 
+            # s.arb_prices[i] .= s.ν[s.edges[i].Ai] 
+            find_arb!(s.xs[i], s.edges[i], s.ν[s.edges[i].Ai])
         else
             s.arb_prices[i] .= s.ηts[i] .+ s.ν[s.edges[i].Ai]
+            find_arb!(s.xs[i], s.edges[i], s.arb_prices[i])
         end
-        find_arb!(s.xs[i], s.edges[i], s.arb_prices[i])
+        # find_arb!(s.xs[i], s.edges[i], s.arb_prices[i])
     end
 end
 
@@ -93,14 +95,14 @@ function solve!(
     # NOTE: zero is always LB since U, Vᵢ nondecreasing
     len_μ = s.Vis_zero ? s.n : s.n + sum(nis)
     bounds = zeros(3, len_μ)
-    bounds[1, :] .= 2
+    bounds[1, :] .= 1
     bounds[2, 1:s.n] .= max.(zero(T), lower_limit(s.flow_objective))
-    bounds[3, 1:s.n] .= upper_limit(s.flow_objective)
+    # bounds[3, 1:s.n] .= upper_limit(s.flow_objective)
     ind = s.n + 1
     if !s.Vis_zero
         for i in 1:s.m
             bounds[2, ind:ind+nis[i]-1] .= max.(zero(T), lower_limit(s.edge_objectives[i]))
-            bounds[3, ind:ind+nis[i]-1] .= upper_limit(s.edge_objectives[i])
+            # bounds[3, ind:ind+nis[i]-1] .= upper_limit(s.edge_objectives[i])
             ind += nis[i]
         end
     end

@@ -206,11 +206,9 @@ time_plt = plot(
     yscale=:log,
     xscale=:log,
     legend=:bottomright,
-    # size=(400, 300),
-    # ylims=(1e-3, 1e3),
+    minorgrid=true,
     yticks=10. .^ (-3:3),
     xticks=10. .^ (2:5),
-    # grid=false,
     linewidth=3,
     color=:blue,
     linestyle=:dash,
@@ -218,6 +216,7 @@ time_plt = plot(
     tickfontsize=12,
     guidefontsize=12,
     legendtitlefontsize=12,
+    dpi=300,
 )
 plot!(time_plt, ns, ts_cf, label="ConvexFlows.jl", color=:black, linewidth=3)
 savefig(time_plt, joinpath(FIGPATH, "opf-time.pdf"))
