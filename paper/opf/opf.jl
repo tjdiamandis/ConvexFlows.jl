@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 using Random, LinearAlgebra, SparseArrays
 using BenchmarkTools
-using Convex, MosekTools, SCS, JuMP
+using MosekTools, SCS, JuMP
 using StatsBase, LogExpFunctions
 using Graphs: Graph, connected_components
 import GraphPlot
@@ -130,7 +130,8 @@ function run_trial_jump(d, lines, optimizer=Mosek.Optimizer())
     GC.gc()
     optimize!(model)
     time = solve_time(model)
-    termination_status(model) != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
+    st = termination_status(model)
+    st != Convex.MOI.OPTIMAL && @info "    termination status: $st"
     pstar = objective_value(model)
     return pstar, time
 end
@@ -186,6 +187,7 @@ function run_trials(ns)
         p_mosek, p_cf, gap_cf, t_mosek, t_cf = run_trial(n)
         rel_obj_diff = (p_mosek - p_cf) / max(abs(p_mosek), abs(p_cf))
         @info "  reldiff:  $rel_obj_diff"
+        rel_obj_diff > 1e-3 && @warn "  Possible incorrect solution!"
         @info "  dualgap:  $gap_cf"
         @info "-- Finished! --"
         ts_mosek[i] = t_mosek
@@ -203,12 +205,13 @@ time_plt = plot(
     label="Mosek",
     xlabel="Number of nodes",
     ylabel="Solve time (s)",
-    yscale=:log,
-    xscale=:log,
+    yscale=:log10,
+    xscale=:log10,
     legend=:bottomright,
     minorgrid=true,
     yticks=10. .^ (-3:3),
     xticks=10. .^ (2:5),
+    ylims=(1e-3, 1e2),
     linewidth=3,
     color=:blue,
     linestyle=:dash,
