@@ -133,3 +133,31 @@ function price(::BalancerThreePool{T}, Rp::Vector{T}) where T
     return [Rp[3]/Rp[1], Rp[3]/Rp[2], 1.0]
 end
 
+
+function build_pools(n_pools, n_tokens; rseed=1, swap_only=true)
+    cfmms = Vector{Edge}()
+    Random.seed!(rseed)
+
+    threshold = swap_only ? 0.5 : 0.4
+    rns = rand(n_pools)
+    for i in 1:n_pools
+        rn = rns[i] 
+        γ = 0.997
+        if rn ≤ threshold
+            Ri = 100 * rand(2) .+ 100
+            Ai = sample(collect(1:n_tokens), 2, replace=false)
+            push!(cfmms, Uniswap(Ri, γ, Ai))
+        elseif rn ≤ 2*threshold
+            Ri = 100 * rand(2) .+ 100
+            Ai = sample(collect(1:n_tokens), 2, replace=false)
+            w = 0.8
+            push!(cfmms, Balancer(Ri, γ, Ai, w))
+        else
+            Ri = 100 * rand(3) .+ 100
+            Ai = sample(collect(1:n_tokens), 3, replace=false)
+            push!(cfmms, BalancerThreePool(Ri, γ, Ai))
+        end
+            
+    end
+    return cfmms
+end
