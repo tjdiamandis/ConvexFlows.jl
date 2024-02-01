@@ -126,19 +126,17 @@ function solve!(
 
     # Objective function
     function fn(μ::Vector{T}) where T
-        # only update if find_arb! has not been called yet
-        if any(μ[i] != s.ν[i] for i in 1:s.n)
-            # Load variables locally
-            s.ν .= μ[1:s.n]
-            if !s.Vis_zero
-                ind = s.n + 1
-                for i in 1:s.m
-                    s.ηts[i] .= μ[ind:ind+nis[i]-1]
-                    ind += nis[i]
-                end
+        # Always updates (first to be called)
+        # Load variables locally
+        s.ν .= μ[1:s.n]
+        if !s.Vis_zero
+            ind = s.n + 1
+            for i in 1:s.m
+                s.ηts[i] .= μ[ind:ind+nis[i]-1]
+                ind += nis[i]
             end
-            find_arb!(s)
         end
+        find_arb!(s)
 
 
         acc = zero(T)
@@ -154,19 +152,8 @@ function solve!(
     end
 
     function grad!(g, μ::Vector{T}) where T
+        # NOTE: always called after fn
         g .= zero(T)
-
-        if any(μ[i] != s.ν[i] for i in 1:s.n)
-            s.ν .= μ[1:s.n]
-            if !s.Vis_zero
-                ind = s.n + 1
-                for i in 1:s.m
-                    s.ηts[i] .= μ[ind:ind+nis[i]-1]
-                    ind += nis[i]
-                end
-            end
-            find_arb!(s)
-        end
         
         gν = @view g[1:s.n]
         grad_Ubar!(gν, s.flow_objective, s.ν)
