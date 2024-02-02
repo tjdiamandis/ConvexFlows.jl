@@ -8,6 +8,7 @@ using Graphs: Graph, connected_components
 import GraphPlot
 import Cairo
 using Plots, LaTeXStrings
+using JLD2
 
 Pkg.activate(joinpath(@__DIR__, "..", ".."))
 using ConvexFlows
@@ -16,6 +17,8 @@ const GP = GraphPlot
 const CF = ConvexFlows
 
 const FIGPATH = joinpath(@__DIR__, "..", "figures")
+const SAVEPATH = joinpath(@__DIR__, "..", "data")
+const SAVEFILE = joinpath(SAVEPATH, "opf.jld2")
 
 include("edges.jl")
 include("objectives.jl")
@@ -60,7 +63,7 @@ Uy = QuadraticPowerCost(d)
 # Solve with Mosek
 model, _ = build_jump_opf_model(lines, d, verbose=false)
 optimize!(model)
-termination_status(model) != Convex.MOI.OPTIMAL && @warn "Problem not solved by Mosek!"
+termination_status(model) ∉ (MOI.OPTIMAL, MOI.SLOW_PROGRESS) && @warn "Problem not solved by Mosek!"
 pstar = objective_value(model)
 
 
@@ -131,7 +134,7 @@ function run_trial_jump(d, lines, optimizer=Mosek.Optimizer())
     optimize!(model)
     time = solve_time(model)
     st = termination_status(model)
-    st != Convex.MOI.OPTIMAL && @info "    termination status: $st"
+    st ∉ (MOI.OPTIMAL, MOI.SLOW_PROGRESS) && @info "    termination status: $st"
     pstar = objective_value(model)
     return pstar, time
 end
@@ -156,9 +159,9 @@ function run_trial_convexflows(d, lines)
     return pstar, dual_gap, solve_time
 end
 
-function run_trial(n)
-    Adj, _ = build_graph(n, d=0.11, α=0.8)
-    @info "  Finished building graph..."
+function run_trial(n; rseed=1, verbose=false)
+    Adj, _ = build_graph(n, d=0.11, α=0.8, rseed=rseed)
+    verbose && @info "  Finished building graph..."
 
     lines = TransmissionLine[]
     for i in 1:n, j in i+1:n
@@ -173,35 +176,76 @@ function run_trial(n)
     d = rand((0.5, 1., 2.), n)
 
     p_mosek, t_mosek = run_trial_jump(d, lines)
-    @info "  Finished running Mosek..."
+    verbose && @info "  Finished running Mosek..."
     p_cf, gap_cf, t_cf = run_trial_convexflows(d, lines)
-    @info "  Finished running ConvexFlows..."
+    verbose && @info "  Finished running ConvexFlows..."
     return p_mosek, p_cf, gap_cf, t_mosek, t_cf
 end
 
-function run_trials(ns)
-    ts_mosek = zeros(length(ns))
-    ts_cf = zeros(length(ns))
+function run_trials(ns; trials=10, verbose=false)
+    # compile
+    run_trial(50)
+
+    ts_mosek = zeros(trials, length(ns))
+    ts_cf = zeros(trials, length(ns))
     for (i, n) in enumerate(ns)
         @info "Starting trial for n=$n..."
-        p_mosek, p_cf, gap_cf, t_mosek, t_cf = run_trial(n)
-        rel_obj_diff = (p_mosek - p_cf) / max(abs(p_mosek), abs(p_cf))
-        @info "  reldiff:  $rel_obj_diff"
-        rel_obj_diff > 1e-3 && @warn "  Possible incorrect solution!"
-        @info "  dualgap:  $gap_cf"
+        for t in 1:trials
+            p_mosek, p_cf, gap_cf, t_mosek, t_cf = run_trial(n; rseed=t, verbose=verbose)
+            rel_obj_diff = (p_mosek - p_cf) / max(abs(p_mosek), abs(p_cf))
+            verbose && @info "  reldiff:  $rel_obj_diff"
+            rel_obj_diff > 1e-3 && @warn "  Possible incorrect solution!"
+            verbose && @info "  dualgap:  $gap_cf"
+            gap_cf > 1e-3 && @warn "  ConvexFlows didn't produce a solution!"
+            ts_mosek[t, i] = t_mosek
+            ts_cf[t, i] = t_cf
+        end
         @info "-- Finished! --"
-        ts_mosek[i] = t_mosek
-        ts_cf[i] = t_cf
     end
     return ts_mosek, ts_cf
 end
 
 ns = 10. .^ (2:0.2:5) |> x -> round.(Int, x)
 ts_mosek, ts_cf = run_trials(ns)
+save(SAVEFILE,
+    "ns", ns,
+    "ts_mosek", ts_mosek,
+    "ts_cf", ts_cf,
+)
+
+
+# ******************************************************************************
+# Plot solve times
+# ******************************************************************************
+ns, ts_mosek, ts_cf = load(SAVEFILE, "ns", "ts_mosek", "ts_cf")
+
+ts_med_mosek = median(ts_mosek, dims=1) |> vec
+ts_med_cf = median(ts_cf, dims=1) |> vec
+q75_mosek = [quantile(ts_mosek[:,i], 0.75) for i in 1:length(ns)] |> vec
+q25_mosek = [quantile(ts_mosek[:,i], 0.25) for i in 1:length(ns)] |> vec
+q75_cf = [quantile(ts_cf[:,i], 0.75) for i in 1:length(ns)] |> vec
+q25_cf = [quantile(ts_cf[:,i], 0.25) for i in 1:length(ns)] |> vec
+
+max_mosek = maximum(ts_mosek, dims=1) |> vec
+max_cf = maximum(ts_cf, dims=1) |> vec
+for (i, n) in enumerate(ns)
+    if max_mosek[i] > 5*ts_med_mosek[i]
+        println("Trial: n = $n")
+        println("  max mosek: $(round(max_mosek[i], digits=3))")
+        println("  med mosek: $(round(ts_med_mosek[i], digits=3))")
+    end
+    if max_cf[i] > 5*ts_med_cf[i]
+        println("Trial: n = $n")
+        println("  max cf: $(round(max_cf[i], digits=3))")
+        println("  med cf: $(round(ts_med_cf[i], digits=3))")
+    end
+end
 
 time_plt = plot(
     ns,
-    ts_mosek,
+    ts_med_mosek,
+    ribbon=(ts_med_mosek .- q25_mosek, q75_mosek .- ts_med_mosek),
+    fillalpha=0.5,
     label="Mosek",
     xlabel="Number of nodes",
     ylabel="Solve time (s)",
@@ -211,7 +255,7 @@ time_plt = plot(
     minorgrid=true,
     yticks=10. .^ (-3:3),
     xticks=10. .^ (2:5),
-    ylims=(1e-3, 1e2),
+    ylims=(1e-3, 5e2),
     linewidth=3,
     color=:blue,
     linestyle=:dash,
@@ -221,5 +265,35 @@ time_plt = plot(
     legendtitlefontsize=12,
     dpi=300,
 )
-plot!(time_plt, ns, ts_cf, label="ConvexFlows.jl", color=:black, linewidth=3)
+# Plot maxes
+plot!(
+    time_plt,
+    ns,
+    max_mosek,
+    label=nothing,
+    color=:blue,
+    seriestype=:scatter,
+    markersize=3,
+)
+
+plot!(
+    time_plt,
+    ns,
+    ts_med_cf,
+    ribbon=(ts_med_cf .- q25_cf, q75_cf .- ts_med_cf),
+    fillalpha=0.5,
+    label="ConvexFlows.jl",
+    color=:black,
+    linewidth=3
+)
+# Plot maxes
+plot!(
+    time_plt,
+    ns,
+    max_cf,
+    label=nothing,
+    color=:black,
+    seriestype=:scatter,
+    markersize=3,
+)
 savefig(time_plt, joinpath(FIGPATH, "opf-time.pdf"))

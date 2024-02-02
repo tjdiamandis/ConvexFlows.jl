@@ -97,7 +97,7 @@ function run_trial_jump(cfmms,
     optimize!(model)
     time = solve_time(model)
     status = termination_status(model)
-    status != MOI.OPTIMAL && @info "\t\tMosek termination status: $status"
+    status ∉ (MOI.OPTIMAL, MOI.SLOW_PROGRESS) && @info "\t\tMosek termination status: $status"
     pstar = objective_value(model)
 
     return time, pstar

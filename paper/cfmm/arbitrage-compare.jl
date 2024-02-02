@@ -5,12 +5,15 @@ using BenchmarkTools
 using JuMP, MosekTools, SCS
 using StatsBase
 using Plots, LaTeXStrings
+using JLD2
 
 Pkg.activate(joinpath(@__DIR__, "..", ".."))
 using ConvexFlows
 const CF = ConvexFlows
 
 const FIGPATH = joinpath(@__DIR__, "..", "figures")
+const SAVEPATH = joinpath(@__DIR__, "..", "data")
+const SAVEFILE = joinpath(SAVEPATH, "arbitrage.jld2")
 
 include("cfmms.jl")
 include("objectives.jl")
@@ -63,10 +66,10 @@ function run_trial_flows(; Uy, Vis=nothing, cfmms, memory=5, verbose=false, fact
 end
 
 
-function run_trial(m; rseed=1)
+function run_trial(m; rseed=1, verbose=false)
     n = round(Int, 2*sqrt(m))
     cfmms = build_pools(m, n; swap_only=true, rseed=rseed)
-    @info "  Finished building graph..."
+    verbose && @info "  Finished building graph..."
     
     # Objective function
     min_price = 1e-2
@@ -83,7 +86,7 @@ function run_trial(m; rseed=1)
         Vis_zero=Vis_zero, 
         optimizer=() -> Mosek.Optimizer()
     )
-    @info "  Finished running Mosek..."
+    verbose && @info "  Finished running Mosek..."
     
     t_cf, p_cf, gap_cf, rp_cf = 
         run_trial_flows(
@@ -91,25 +94,31 @@ function run_trial(m; rseed=1)
             cfmms=cfmms,
             verbose=false,
         )
-    @info "  Finished running ConvexFlows..."
+    verbose && @info "  Finished running ConvexFlows..."
     
     return p_mosek, p_cf, gap_cf, rp_cf, t_mosek, t_cf
 end
 
-function run_trials(ms)
-    ts_mosek = zeros(length(ms))
-    ts_cf = zeros(length(ms))
+function run_trials(ms; trials=10, verbose=false)
+    #compile
+    run_trial(50)
+
+    ts_mosek = zeros(trials, length(ms))
+    ts_cf = zeros(trials, length(ms))
     for (i, m) in enumerate(ms)
         @info "Starting trial for m=$m..."
-        p_mosek, p_cf, gap_cf, rp_cf, t_mosek, t_cf = run_trial(m)
-        rel_obj_diff = (p_mosek - p_cf) / max(abs(p_mosek), abs(p_cf))
-        @info "  reldiff:  $rel_obj_diff"
-        rel_obj_diff > 1e-3 && @warn "  Possible incorrect solution!"
-        @info "  dualgap:  $gap_cf"
-        @info "  rp norm:  $rp_cf"
+        for t in 1:trials
+            p_mosek, p_cf, gap_cf, rp_cf, t_mosek, t_cf = run_trial(m; rseed=t, verbose=verbose)
+            rel_obj_diff = (p_mosek - p_cf) / max(abs(p_mosek), abs(p_cf))
+            verbose && @info "  reldiff:  $rel_obj_diff"
+            rel_obj_diff > 1e-3 && @warn "  Possible incorrect solution!"
+            verbose && @info "  dualgap:  $gap_cf"
+            verbose && @info "  rp norm:  $rp_cf"
+            gap_cf > 1e-3 && @warn "  ConvexFlows didn't produce a solution!"
+            ts_mosek[t, i] = t_mosek
+            ts_cf[t, i] = t_cf
+        end
         @info "-- Finished! --"
-        ts_mosek[i] = t_mosek
-        ts_cf[i] = t_cf
     end
     return ts_mosek, ts_cf
 end
@@ -122,11 +131,43 @@ end
 # ******************************************************************************
 ms = 10 .^ range(2, 5, 10) .|> x -> round(Int, x)
 ts_mosek, ts_cf = run_trials(ms)
+save(SAVEFILE,
+    "ms", ms,
+    "ts_mosek", ts_mosek,
+    "ts_cf", ts_cf,
+)
 
+# ******************************************************************************
+# Plot solve times
+# ******************************************************************************
+ms, ts_mosek, ts_cf = load(SAVEFILE, "ms", "ts_mosek", "ts_cf")
+
+ts_med_mosek = median(ts_mosek, dims=1) |> vec
+ts_med_cf = median(ts_cf, dims=1) |> vec
+q75_mosek = [quantile(ts_mosek[:,i], 0.75) for i in 1:length(ms)] |> vec
+q25_mosek = [quantile(ts_mosek[:,i], 0.25) for i in 1:length(ms)] |> vec
+q75_cf = [quantile(ts_cf[:,i], 0.75) for i in 1:length(ms)] |> vec
+q25_cf = [quantile(ts_cf[:,i], 0.25) for i in 1:length(ms)] |> vec
+
+max_mosek = maximum(ts_mosek, dims=1) |> vec
+max_cf = maximum(ts_cf, dims=1) |> vec
+for (i, m) in enumerate(ms)
+    if max_mosek[i] > 5*ts_med_mosek[i]
+        println("Trial: n = $m")
+        println("  max mosek: $(round(max_mosek[i], digits=3))")
+        println("  med mosek: $(round(ts_med_mosek[i], digits=3))")
+    end
+    if max_cf[i] > 5*ts_med_cf[i]
+        println("  max cf: $(round(max_cf[i], digits=3))")
+        println("  med cf: $(round(ts_med_cf[i], digits=3))")
+    end
+end
 
 time_plt = plot(
     ms,
-    ts_mosek,
+    ts_med_mosek,
+    ribbon=(ts_med_mosek .- q25_mosek, q75_mosek .- ts_med_mosek),
+    fillalpha=0.5,
     label="Mosek",
     xlabel="Number of nodes",
     ylabel="Solve time (s)",
@@ -146,5 +187,32 @@ time_plt = plot(
     legendtitlefontsize=12,
     dpi=300,
 )
-plot!(time_plt, ms, ts_cf, label="ConvexFlows.jl", color=:black, linewidth=3)
+plot!(
+    time_plt,
+    ms,
+    max_mosek,
+    label=nothing,
+    color=:blue,
+    seriestype=:scatter,
+    markersize=3,
+)
+plot!(
+    time_plt,
+    ms,
+    ts_med_cf,
+    ribbon=(ts_med_cf .- q25_cf, q75_cf .- ts_med_cf),
+    fillalpha=0.5,
+    label="ConvexFlows.jl",
+    color=:black,
+    linewidth=3
+)
+plot!(
+    time_plt,
+    ms,
+    max_cf,
+    label=nothing,
+    color=:black,
+    seriestype=:scatter,
+    markersize=3,
+)
 savefig(time_plt, joinpath(FIGPATH, "cfmm-time.pdf"))
