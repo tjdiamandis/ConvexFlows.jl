@@ -83,6 +83,7 @@ function solve!(
     pgtol=1e-5,
     max_fun=15_000,
     max_iter=10_000,
+    final_netflows=true
 ) where T
 
     # check arguments
@@ -210,7 +211,12 @@ function solve!(
         end
     end
     find_arb!(s)
-    netflows!(s)
+    if final_netflows 
+        netflows!(s)
+    else
+        grad_Ubar!(s.y, s.flow_objective, s.ν)
+        s.y .*= -1
+    end
     
     # TODO: print objective, primal feasibility, etc
     return solver_time

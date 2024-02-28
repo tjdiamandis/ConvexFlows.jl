@@ -3,11 +3,20 @@ function build_jump_opf_model(
     d;
     optimizer=() -> Mosek.Optimizer(),
     verbose=false,
+    mosek_high_precision=false,
 )
     m = length(lines)
     n = length(d)
 
     model = Model(optimizer)
+    if mosek_high_precision
+        set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_DFEAS", 1e-16)
+        set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_MU_RED", 1e-16)
+        set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_REL_GAP", 1e-16)
+        set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_PFEAS", 1e-16)
+        set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_NEAR_REL", 1.0)
+        set_optimizer_attribute(model, "MSK_IPAR_PRESOLVE_USE", 0)
+    end
     !verbose && set_silent(model)
     @variable(model, y[1:n])
 

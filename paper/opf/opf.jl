@@ -61,7 +61,7 @@ d = rand((0.5, 1., 2.), n)
 Uy = QuadraticPowerCost(d)
 
 # Solve with Mosek
-model, _ = build_jump_opf_model(lines, d, verbose=false)
+model, _ = build_jump_opf_model(lines, d, verbose=false, mosek_high_precision=true)
 optimize!(model)
 termination_status(model) ∉ (MOI.OPTIMAL, MOI.SLOW_PROGRESS) && @warn "Problem not solved by Mosek!"
 pstar = objective_value(model)
@@ -75,21 +75,35 @@ s = Solver(
     n=n,
 )
 
-ITERS_NEEDED = 31
+ITERS_NEEDED = 43
 dual_gaps = zeros(ITERS_NEEDED+1)
 obj_diffs = zeros(ITERS_NEEDED+1)
+rp_norms = zeros(ITERS_NEEDED+1)
 dual_gaps[1] = NaN
 obj_diffs[1] = (pstar - U(Uy, zeros(n))) / max(abs(pstar), abs(U(Uy, zeros(n))))
+rp_norms[1] = NaN
+rp = zeros(n)
+y_hat = zeros(n)
 
 # Hack to get iterations out of LBFGSB.jl
 for max_iter in 1:ITERS_NEEDED
-    CF.solve!(s, verbose=false, factr=1e1, memory=5, max_iter=max_iter)
-    p_iter = U(Uy, s.y)
+    CF.solve!(s, verbose=false, factr=1, memory=10, max_iter=max_iter, final_netflows=false, pgtol=eps())
+    y_hat .= 0
+    for i in 1:m
+        y_hat[lines[i].Ai] .+= s.xs[i]
+    end
+
+    p_hat = U(Uy, y_hat)
     d_iter = Ubar(Uy, s.ν) + sum(dot(s.xs[i], s.ν[lines[i].Ai]) for i in 1:m)
-    dual_gap = (d_iter - p_iter) / max(abs(d_iter), abs(p_iter))
-    
+    dual_gap = (d_iter - p_hat) / max(abs(d_iter), abs(p_hat))
+    rp .= s.y
+    for i in 1:m
+        rp[lines[i].Ai] .-= s.xs[i]
+    end
+
+    rp_norms[max_iter+1] = norm(rp) / max(norm(s.y), norm(rp .- s.y))
     dual_gaps[max_iter+1] = dual_gap
-    obj_diffs[max_iter+1] = (pstar - p_iter)/max(abs(pstar), abs(p_iter))
+    obj_diffs[max_iter+1] = (pstar - p_hat)/max(abs(pstar), abs(p_hat))
 end
 
 iter_conv_plt = plot(
@@ -98,8 +112,8 @@ iter_conv_plt = plot(
     yaxis=:log,
     label="Objective difference",
     xlabel="Iteration",
-    legend=:topright,
-    yticks=10. .^ (-12:2:0),
+    legend=:bottomleft,
+    yticks=10. .^ (-15:2:0),
     linewidth=3,
     color=:blue,
     linestyle=:dash,
@@ -109,14 +123,33 @@ iter_conv_plt = plot(
     legendtitlefontsize=12,
     dpi=300,
 )
+ plot!(
+    iter_conv_plt,
+    0:ITERS_NEEDED,
+    rp_norms,
+    yaxis=:log,
+    label="Primal Residual",
+    linewidth=3,
+    color=:red,
+    linestyle=:dot,
+)
 
 plot!(
     iter_conv_plt, 
     0:ITERS_NEEDED, 
-    dual_gaps, 
+    dual_gaps .+ 10eps(), 
     label="Duality gap",
     color=:black,
     linewidth=3,
+)
+plot!(
+    iter_conv_plt, 
+    0:ITERS_NEEDED, 
+    sqrt(eps()).*ones(ITERS_NEEDED+1), 
+    label=L"$\sqrt{\texttt{eps}}$",
+    color=:black,
+    linestyle=:dash,
+    linewidth=1,
 )
 savefig(iter_conv_plt, joinpath(FIGPATH, "opf-iter-conv.pdf"))
 # ******************************************************************************
