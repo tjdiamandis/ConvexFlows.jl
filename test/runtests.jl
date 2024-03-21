@@ -1,6 +1,8 @@
 using ConvexFlows
 using Test
 
-@testset "ConvexFlows.jl" begin
-    # Write your tests here.
+using LinearAlgebra, Random
+
+@testset "BFGS" begin
+    include("bfgs.jl")
 end
