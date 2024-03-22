@@ -25,10 +25,10 @@ Random.seed!(1)
     @test isapprox(xstar, res1.x; atol=1e-6)
     @test is_optimal(res1; eps_g_norm=g_norm_tol)
 
-    # # LBFGS
-    # s1_lbfgs = BFGSSolver(n; method=:lbfgs)
-    # res1_lbfgs = solve!(s1_lbfgs, f1∇f1!, p1; options=options, x0=x0)
-    # @test is_optimal(res1_lbfgs; eps_g_norm=g_norm_tol)
+    # LBFGS
+    s1_lbfgs = BFGSSolver(n; method=:lbfgs)
+    res1_lbfgs = solve!(s1_lbfgs, f1∇f1!, p1; options=options, x0=x0)
+    @test is_optimal(res1_lbfgs; eps_g_norm=g_norm_tol)
 end
 
 @testset "rosenbrock" begin
@@ -47,10 +47,10 @@ end
     res2 = solve!(solver2, f2∇f2!, p2; options=options, x0=x0)
     @test is_optimal(res2; eps_g_norm=g_norm_tol)
     
-    # # LBFGS
-    # s2_lbfgs = BFGSSolver(n; method=:lbfgs)
-    # res2_lbfgs = solve!(s2_lbfgs, f2∇f2!, p2; options=options, x0=x0)
-    # @test is_optimal(res2_lbfgs; eps_g_norm=g_norm_tol)
+    # LBFGS
+    s2_lbfgs = BFGSSolver(n; method=:lbfgs)
+    res2_lbfgs = solve!(s2_lbfgs, f2∇f2!, p2; options=options, x0=x0)
+    @test is_optimal(res2_lbfgs; eps_g_norm=g_norm_tol)
 
     
     # test iteration limit

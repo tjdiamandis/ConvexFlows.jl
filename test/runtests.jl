@@ -3,6 +3,6 @@ using Test
 
 using LinearAlgebra, Random
 
-@testset "BFGS" begin
+@testset "(L)BFGS" begin
     include("bfgs.jl")
 end

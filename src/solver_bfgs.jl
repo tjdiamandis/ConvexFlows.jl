@@ -29,7 +29,8 @@ end
 
 function solve!(
     problem::ConvexFlowProblemTwoNode;
-    options::Union{BFGSOptions,Nothing}=nothing
+    options::Union{BFGSOptions,Nothing}=nothing,
+    method=:bfgs
 )
     n, m = problem.n, problem.m
     options = isnothing(options) ? BFGSOptions() : options
@@ -64,7 +65,7 @@ function solve!(
     end
     f∇f!(g, x, p) = f∇f!(g, x, problem.xs, problem.U, problem.edges)
 
-    solver = BFGSSolver(n)
+    solver = BFGSSolver(n; method=method)
     result = solve!(solver, f∇f!, nothing; options=options, x0=problem.ν)
 
     problem.ν .= result.x

@@ -36,17 +36,18 @@ function iter_format(::BFGSSolver, ::BFGSOptions)
 end
 
 
+# ---- BFGS Stuff ----
 # BFGS search direction (primal)
-function compute_search_direction!(solver::BFGSSolver{T}) where T
-    Hk, g, pk = solver.state.Hk, solver.state.gk, solver.state.pk
+function compute_search_direction!(state::BFGSState{T}) where T
+    Hk, g, pk = state.Hk, state.gk, state.pk
     mul!(pk, Hk, g)
     pk .= -pk
     return nothing
 end
 
 # BFGS update
-function update_Hk!(solver::BFGSSolver{T}) where T
-    Hk, sk, yk = solver.state.Hk, solver.state.sk, solver.state.yk
+function update_Hk!(state::BFGSState{T}) where T
+    Hk, sk, yk = state.Hk, state.sk, state.yk
     ρk = 1 / dot(yk, sk)
     isnan(ρk) && return nothing
 
@@ -55,11 +56,60 @@ function update_Hk!(solver::BFGSSolver{T}) where T
 end
 
 # scaling from NW06 S6.1 p143
-function scale_H0!(solver::BFGSSolver{T}) where T
-    Hk, sk, yk = solver.state.Hk, solver.state.sk, solver.state.yk
+function scale_H0!(state::BFGSState{T}) where T
+    Hk, sk, yk = state.Hk, state.sk, state.yk
     c = dot(yk, sk) / dot(yk, yk)
     isnan(c) && (c = one(T);)
     Hk .= c * Hk
+    return nothing
+end
+
+
+# ---- LBFGS Stuff ----
+# LBFGS search direction
+function compute_search_direction!(state::LBFGSState{T}) where T
+    pk, ind = state.pk, state.ind[1]
+    yks, sks, γk = state.yks, state.sks, state.γk[1]
+    ρs, αs, βs = state.ρs, state.αs, state.βs
+    m = length(state.sks)
+    
+    # NW06 Algorithm 7.4 p178
+    reverse_inds = mod.((ind-1:-1:ind-m) .- 1, m) .+ 1
+    forward_inds = mod.((ind-m:ind-1) .- 1, m) .+ 1
+
+    pk .= state.gk
+    for i in reverse_inds
+        (iszero(ρs[i]) || isinf(ρs[i])) && continue
+        αs[i] = ρs[i] * dot(sks[i], pk)
+        @. pk -= αs[i] * yks[i]
+    end
+
+    pk .= γk[1] * pk
+    for i in forward_inds
+        (iszero(ρs[i]) || isinf(ρs[i])) && continue
+        βs[i] = ρs[i] * dot(yks[i], pk)
+        @. pk += (αs[i] - βs[i]) * sks[i]
+    end
+    pk .= -pk
+
+    return nothing
+end
+
+function update_Hk!(state::LBFGSState{T}) where T
+    sks, yks, ind = state.sks, state.yks, state.ind[1]
+
+    prev_ind = mod(ind-2, length(sks)) + 1
+    state.γk[1] = dot(yks[prev_ind], sks[prev_ind]) / dot(yks[prev_ind], yks[prev_ind])
+    state.γk[1] = isnan(state.γk[1]) ? one(T) : state.γk[1]
+
+    sks[ind] .= state.sk
+    yks[ind] .= state.yk
+    state.ρs[ind] = 1 / dot(yks[ind], sks[ind])
+    ind = mod(ind, length(sks)) + 1
+    return nothing
+end
+
+function scale_H0!(::LBFGSState{T}) where T
     return nothing
 end
 
@@ -196,7 +246,7 @@ function solve!(
         k += 1
 
         # --- Compute search direction and step ---
-        compute_search_direction!(solver)
+        compute_search_direction!(solver.state)
         αk = line_search(solver, f∇f!, p, solver.obj_val, gk)
         
         #  --- Update state ---
@@ -222,8 +272,8 @@ function solve!(
         # --- Check convergence ---
         converged(solver, options) && break
         
-        k == 1 && isnothing(H0) && scale_H0!(solver)
-        update_Hk!(solver)
+        k == 1 && isnothing(H0) && scale_H0!(state)
+        update_Hk!(state)
     end
 
     # --- Print Footer ---

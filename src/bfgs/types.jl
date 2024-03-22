@@ -50,6 +50,65 @@ function initialize_state!(state::BFGSState{T}; x0=nothing, H0=nothing) where T
 end
 
 
+#  ---- LBFGSSolver ----
+struct LBFGSState{
+    T <: AbstractFloat,
+    V <: AbstractVector{T}, 
+} <: SolverState{T}
+    ind::Vector{Int}    # index of current iterate
+    xk::V               # current iterate
+    xprev::V            # previous iterate
+    xnext::V            # next iterate
+    pk::V               # search direction
+    sk::V               # step
+    gk::V               # gradient at current iterate
+    gnext::V            # gradient at next iterate
+    yk::V               # gradient difference
+    sks::Vector{V}      # history: step
+    yks::Vector{V}      # history: gradient difference
+    αs::V               # cache for hessian mult
+    βs::V               # cache for hessian mult
+    ρs::V               # cache for hessian mult
+    γk::V               # scaling factor for Hₖ⁰
+    vn::V               # cache vector
+end
+
+function LBFGSState(T::DataType, n::Int, m::Int)
+    return LBFGSState(
+        [1],
+        zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n), zeros(T, n),
+        zeros(T, n), zeros(T, n), zeros(T, n),
+        [zeros(T, n) for _ in 1:m],
+        [zeros(T, n) for _ in 1:m],
+        zeros(T, m), zeros(T, m), zeros(T, m),
+        ones(T, 1),
+        zeros(T, n)
+    )
+end
+
+function reset_state!(state::LBFGSState{T}) where T
+    state.xk .= zero(T)
+    state.pk .= zero(T)
+    
+    state.gk .= zero(T)
+    state.gnext .= zero(T)
+
+    for i in 1:length(state.sks)
+        state.sks[i] .= zero(T)
+        state.yks[i] .= zero(T)
+    end
+    state.γk[1] = one(T)
+    
+    return nothing
+end
+
+function initialize_state!(state::LBFGSState{T}; x0=nothing, H0=nothing) where T
+    !isnothing(x0) && (state.xk .= x0;)
+    !isnothing(H0) && (state.γk[1] = H0;)
+    return nothing
+end
+
+
 #  ---- BFGSSolver ----
 mutable struct BFGSSolver{
     T <: AbstractFloat,
@@ -66,6 +125,7 @@ end
 function BFGSSolver(
     n::Int;
     method=:bfgs,
+    m=10,
     T=Float64,
     K=nothing,
     c1=1e-4,
@@ -73,7 +133,7 @@ function BFGSSolver(
     t=0,
 )
     
-    state = BFGSState(T, n)
+    state = method == :bfgs ? BFGSState(T, n) : LBFGSState(T, n, m)
 
     return BFGSSolver{T}(
         n,
