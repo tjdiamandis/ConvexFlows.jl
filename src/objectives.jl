@@ -51,26 +51,26 @@ function upper_limit end
 # quadratic cost: u(y) = -0.5*(-y + b)₊²
 struct NonpositiveQuadratic{T} <: Objective
     n::Int
+    a::Vector{T}
     b::Vector{T}
 end
-NonpositiveQuadratic(b::T) where T = NonpositiveQuadratic(length(b), b)
+function NonpositiveQuadratic(b::Vector{T}; a=nothing) where T
+    a = isnothing(a) ? ones(T, length(b)) : a
+    NonpositiveQuadratic(length(b), a, b)
+end
 
 Base.length(obj::NonpositiveQuadratic) = obj.n
 
 function U(obj::NonpositiveQuadratic{T}, y) where T
-    return -0.5*sum(x->abs2(max(x, zero(T))), obj.b - y)
-end
-
-function ∇U(obj::NonpositiveQuadratic{T}, y) where T
-    return obj.b - y
+    return -0.5*sum(x->abs2(max(x, zero(T))), sqrt.(obj.a) .* obj.b .- y)
 end
 
 function Ubar(obj::NonpositiveQuadratic{T}, ν) where T
-    return 0.5*sum(abs2, ν) - dot(obj.b, ν)
+    return 0.5*sum(abs2, ν ./ sqrt.(obj.a)) - dot(obj.b, ν)
 end
 
 function ∇Ubar!(g, obj::NonpositiveQuadratic{T}, ν) where T
-    @. g = ν - obj.b
+    @. g = ν / obj.a - obj.b
     return nothing
 end
 

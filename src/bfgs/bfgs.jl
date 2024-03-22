@@ -123,8 +123,9 @@ function line_search(solver::BFGSSolver{T}, f∇f!, p, fxk, gxk) where T
 
     # # ensure we don't step out of feasible region
     # # TODO: faster to broadcast to cache vector and then compute max?
-    # tmax_x = minimum(i -> pk[i] < 0 ? -xk[i] / pk[i] : typemax(T), 1:solver.n)
+    tmax_x = minimum(i -> pk[i] < 0 ? -xk[i] / pk[i] : typemax(T), 1:solver.n)
     # ub0 = min(tmax_λ, tmax_x) - sqrt(eps(T))
+    ub0 = tmax_x - sqrt(eps(T))
 
     lb, ub = lb0, ub0
     @inline function hdh!(vn, α, fxk)
