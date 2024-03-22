@@ -101,7 +101,7 @@ end
 @kwdef mutable struct BFGSOptions
     max_iters::Int = 1000
     max_time_sec::Float64 = 60.0
-    print_iter::Int = 1
+    print_iter::Int = 10
     verbose::Bool = true
     logging::Bool = true
     eps_g_norm::Float64 = 1e-6
@@ -168,7 +168,7 @@ function Base.show(io::IO, result::BFGSResult)
     color = result.status == :OPTIMAL ? :green : :red
     printstyled(io, " $(result.status)\n", color=color)
     print(io, "f(x)       :   $(@sprintf("%.4g", result.obj_val))\n")
-    print(io, "∇f(x)      :   $(@sprintf("%.4g", result.obj_val))\n")
+    print(io, "∇f(x)      :   $(@sprintf("%.4g", result.g_norm))\n")
     print(io, "num iters  :   $(result.log.num_iters)\n")
     print(io, "solve time : $(round(result.log.solve_time, digits=3))s\n")
 end
