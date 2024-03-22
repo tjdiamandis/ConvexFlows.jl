@@ -235,7 +235,7 @@ function solve!(
     solver.obj_val = f∇f!(gk, xk, p)
     solver.g_norm = norm(gk)
     time_sec = (time_ns() - solve_time_start) / 1e9
-    options.logging && populate_log!(tmp_log, solver, options, k+1, time_sec)
+    options.logging && populate_log!(tmp_log, solver, options, k+1, time_sec, xk)
     options.verbose && print_iter(
         iter_fmt, (k, solver.obj_val, solver.g_norm, time_sec)
     )
@@ -259,7 +259,7 @@ function solve!(
 
         # --- Logging ---
         time_sec = (time_ns() - solve_time_start) / 1e9
-        options.logging && populate_log!(tmp_log, solver, options, k+1, time_sec)
+        options.logging && populate_log!(tmp_log, solver, options, k+1, time_sec, xk)
 
         # --- Printing ---
         if options.verbose && (k == 1 || k % options.print_iter == 0)
@@ -299,6 +299,7 @@ function solve!(
         log = BFGSLog(
             tmp_log.fx[1:k+1],
             tmp_log.g_norm[1:k+1],
+            tmp_log.xk[1:k+1],
             tmp_log.iter_time[1:k+1],
             k,
             solve_time

@@ -165,7 +165,6 @@ end
     verbose::Bool = true
     logging::Bool = true
     eps_g_norm::Float64 = 1e-6
-    eps_cs::Float64 = 1e-6
     num_threads::Int = Sys.CPU_THREADS
     μ::Float64 = 10
 end
@@ -175,6 +174,7 @@ end
 struct BFGSLog{T, V <: AbstractVector{T}}
     fx::Union{Nothing, V}
     g_norm::Union{Nothing, V}
+    xk::Union{Nothing, Vector{V}}
     iter_time::Union{Nothing, V}
     num_iters::Int
     solve_time::Float64
@@ -182,7 +182,7 @@ end
 
 function BFGSLog(k::Int, solve_time::T) where {T <: AbstractFloat}
     return BFGSLog{T, Vector{T}}(
-        nothing, nothing, nothing,
+        nothing, nothing, nothing, nothing,
         k,
         solve_time
     )
@@ -199,13 +199,15 @@ function create_temp_log(solver::BFGSSolver, max_iters::Int)
     return BFGSLog(
         zeros(T, max_iters),
         zeros(T, max_iters),
+        [zeros(T, solver.n) for _ in 1:max_iters],
         zeros(T, max_iters),
         zero(Int),
         zero(T)
     )
 end
 
-function populate_log!(solver_log::BFGSLog, solver::BFGSSolver, ::BFGSOptions, k, time_sec)
+function populate_log!(solver_log::BFGSLog, solver::BFGSSolver, ::BFGSOptions, k, time_sec, xk)
+    solver_log.xk[k] .= xk
     solver_log.iter_time[k] = time_sec
     solver_log.fx[k] = solver.obj_val
     solver_log.g_norm[k] = solver.g_norm

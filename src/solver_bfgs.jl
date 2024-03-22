@@ -30,7 +30,8 @@ end
 function solve!(
     problem::ConvexFlowProblemTwoNode;
     options::Union{BFGSOptions,Nothing}=nothing,
-    method=:bfgs
+    method=:bfgs,
+    memory=10
 )
     n, m = problem.n, problem.m
     options = isnothing(options) ? BFGSOptions() : options
@@ -65,25 +66,25 @@ function solve!(
     end
     f∇f!(g, x, p) = f∇f!(g, x, problem.xs, problem.U, problem.edges)
 
-    solver = BFGSSolver(n; method=method)
+    solver = BFGSSolver(n; method=method, m=memory)
     result = solve!(solver, f∇f!, nothing; options=options, x0=problem.ν)
 
     problem.ν .= result.x
     ∇Ubar!(problem.y, problem.U, problem.ν)
     problem.y .= -problem.y
-    yhat = netflows(problem)
+    yhat = netflows(problem.xs, problem.edges, problem.n)
     pres = norm(problem.y - yhat)
 
     options.verbose && @printf("\nDual problem solve status:\n")
     display(result)
     options.verbose && @printf("Primal feasibility ||y - ∑Aᵢxᵢ||: %.4e\n", pres)
-    return nothing
+    return result
 end
 
 
-function netflows(prob::ConvexFlowProblemTwoNode{T}) where T
-    ret = zeros(prob.n)
-    for (x, e) in zip(prob.xs, prob.edges)
+function netflows(xs, edges, n) where T
+    ret = zeros(n)
+    for (x, e) in zip(xs, edges)
         ret[e.Ai[1]] += x[1]
         ret[e.Ai[2]] += x[2]
     end
