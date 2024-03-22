@@ -15,11 +15,11 @@ end
 
 
 function print_headers(::BFGSSolver, ::BFGSOptions)
-    return ["Iteration", "f", "||∇f||", "∇fᵀx", "Time"]
+    return ["Iteration", "f", "||∇f||", "Time"]
 end
 
 function header_format(::BFGSSolver, ::BFGSOptions)
-    return ["%13s", "%14s", "%14s", "%14s", "%14s"]
+    return ["%13s", "%14s", "%14s", "%14s"]
 end
 
 function print_iter(format, data)
@@ -32,7 +32,7 @@ function print_iter(format, data)
 end
 
 function iter_format(::BFGSSolver, ::BFGSOptions)
-    return ["%13s", "%14.3e", "%14.3e", "%14.3e", "%13.3f"]
+    return ["%13s", "%14.3e", "%14.3e", "%13.3f"]
 end
 
 
@@ -79,7 +79,10 @@ function line_search(solver::BFGSSolver{T}, f∇f!, p, fxk, gxk) where T
     lb, ub = lb0, ub0
     @inline function hdh!(vn, α, fxk)
         @. xnext = xk + α * pk
+        
+        # ensures we don't step out of feasible region x ≥ 0
         any(xi -> xi < sqrt(eps()), xnext) && return typemax(T), typemax(T)
+
         fnext = f∇f!(vn, xnext, p)
         # fnext += sum(xi -> xi < sqrt(eps) ? -solver.g_norm*log(xi) : zero(T), xnext)
         h = fnext - fxk
@@ -181,11 +184,10 @@ function solve!(
     # Compute values at x0
     solver.obj_val = f∇f!(gk, xk, p)
     solver.g_norm = norm(gk)
-    solver.cs_norm = dot(gk, xk)
     time_sec = (time_ns() - solve_time_start) / 1e9
     options.logging && populate_log!(tmp_log, solver, options, k+1, time_sec)
     options.verbose && print_iter(
-        iter_fmt, (k, solver.obj_val, solver.g_norm, solver.cs_norm, time_sec)
+        iter_fmt, (k, solver.obj_val, solver.g_norm, time_sec)
     )
 
     while k < options.max_iters &&
@@ -213,7 +215,7 @@ function solve!(
         if options.verbose && (k == 1 || k % options.print_iter == 0)
             print_iter(
                 iter_fmt,
-                (k, solver.obj_val, solver.g_norm, solver.cs_norm, time_sec)
+                (k, solver.obj_val, solver.g_norm, time_sec)
             )
         end
 

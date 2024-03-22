@@ -58,7 +58,7 @@ NonpositiveQuadratic(b::T) where T = NonpositiveQuadratic(length(b), b)
 Base.length(obj::NonpositiveQuadratic) = obj.n
 
 function U(obj::NonpositiveQuadratic{T}, y) where T
-    return -0.5*sum(x->abs2(max(x, zero(T))), obj.d - y)
+    return -0.5*sum(x->abs2(max(x, zero(T))), obj.b - y)
 end
 
 function ∇U(obj::NonpositiveQuadratic{T}, y) where T
