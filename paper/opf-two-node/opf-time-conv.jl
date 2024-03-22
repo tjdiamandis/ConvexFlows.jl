@@ -9,16 +9,14 @@ Pkg.activate(joinpath(@__DIR__, "..", ".."))
 using ConvexFlows
 
 const FIGPATH = joinpath(@__DIR__, "..", "figures")
-const SAVEPATH = joinpath(@__DIR__, "..", "data")
-const SAVEFILE = joinpath(SAVEPATH, "opf-two-node.jld2")
 
 include(joinpath(@__DIR__, "..", "opf", "utils.jl"))
 # ******************************************************************************
 
 # Problem parameters
 Random.seed!(1)
-n = 10
-T = 24
+n = 100
+T = 2
 N = n*T
 
 # Objective function
