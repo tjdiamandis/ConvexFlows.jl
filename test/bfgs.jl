@@ -42,7 +42,7 @@ end
         g[2] = 200(x₂ - x₁^2)
         return 100(x₂ - x₁^2)^2 + (1 - x₁)^2
     end
-    x0 = (2, 1)
+    x0 = (0.1, 0.1)
     solver2 = BFGSSolver(n)
     res2 = solve!(solver2, f2∇f2!, p2; options=options, x0=x0)
     @test is_optimal(res2; eps_g_norm=g_norm_tol)
